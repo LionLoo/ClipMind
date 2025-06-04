@@ -7,6 +7,12 @@ from datetime import datetime
 from sentence_transformers import SentenceTransformer
 import config
 import json
+from startup import create_startup
+
+if __name__ == "__main__":
+    create_startup()
+
+
 
 db = TinyDB(
     config.db_file,
