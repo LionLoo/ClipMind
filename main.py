@@ -8,9 +8,10 @@ from sentence_transformers import SentenceTransformer
 import config
 import json
 from startup import create_startup
+import os
 
 if __name__ == "__main__":
-    create_startup()
+    create_startup(script_path=os.path.abspath(__file__))
 
 
 
