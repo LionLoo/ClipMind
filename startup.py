@@ -4,11 +4,11 @@ def create_startup(name="ClipMind", script_path=None):
     if script_path is None:
         script_path = os.path.abspath(__file__)
 
-    startup_foler = os.path.join(
+    startup_folder = os.path.join(
         os.getenv('APPDATA'), 'Microsoft\\Windows\\Start Menu\\Programs\\Startup'
     )
 
-    bat_path = os.path.join(startup_foler, f"{name}.bat")
+    bat_path = os.path.join(startup_folder, f"{name}.bat")
 
     if os.path.exists(bat_path):
         print("ClipMind AutoStart Already Enabled")
