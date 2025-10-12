@@ -1,3 +1,4 @@
+#ARCHIVED FOR WHEN JUST TEXT -> MOVED TO VECTOR_STORE (HANDLES BOTH TEXT AND IMAGES)
 #purpose:
 #keep persistent FAISS index in DISK
 # -add one vector per saved ITEM (row in DB)
