@@ -13,6 +13,8 @@ from app.db.session import init_db, get_session
 from app.db.models import Item
 from app.index.store import IndexStore
 from app.search.encoder import encode_text_to_vector, VECTOR_DIM
+from app.index.vector_store import DualVectorStore
+from app.search.clip_encoder import IMAGE_VECTOR_DIM
 
 #=====JUNK FILTERING RULES=====
 
@@ -135,7 +137,7 @@ def main():
     poll_ms = 1000
 
     print("[SYSTEM] Loaddings FAISS index...")
-    store = IndexStore(vector_dimension=VECTOR_DIM)
+    store = DualVectorStore(text_dim=VECTOR_DIM, image_dim=IMAGE_VECTOR_DIM)
     print(f"[SYSTEM] Index loaded. Current size: {store.index.ntotal} vectors")
     print(f"[SYSTEM] Deduplication: Exact and near detection enabled")
     save_counter = 0 #track num items since last save
@@ -182,7 +184,12 @@ def main():
 
             #insert into DB
             with get_session() as session:
-                new_item = Item(text=current, content_hash=content_hash)
+                new_item = Item(
+                    text=current,
+                    content_hash=content_hash,
+                    source="clipboard",  # mark as from clipboard
+                    blob_uri=None  # no image for clipboard
+                )
                 session.add(new_item)
                 session.commit()
                 session.refresh(new_item)
@@ -190,7 +197,7 @@ def main():
             #Encode text to vector
             try:
                 vector = encode_text_to_vector(current)
-                store.add_vector(item_id=new_item.id, vector=vector)
+                store.add_text_vector(item_id=new_item.id, vector=vector)
                 save_counter += 1
 
                 if save_counter >= save_interval:

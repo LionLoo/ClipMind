@@ -4,3 +4,4 @@ top_k_results = 5
 sqlite_url = "sqlite:///clipmind.db"
 faiss_index_path = "faiss/clipmind.index"
 faiss_idmap_path = "faiss/idmap.npy"
+PROCESSED_CACHE_FILE = "processed_screenshots.json"

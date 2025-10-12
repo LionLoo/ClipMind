@@ -13,7 +13,7 @@ from app.core import config
 
 VectorKind = Literal["text", "image"]
 
-class DualVeectorStore:
+class DualVectorStore:
     """
     Manages seperate FAISS Indexes
     - text_index: for text embeddings
