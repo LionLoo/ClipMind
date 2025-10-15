@@ -103,6 +103,23 @@ class DualVectorStore:
 
         return distances, positions, item_ids
 
+    def search_image(self, query_vector: np.ndarray, top_k: int) -> Tuple[np.ndarray, np.ndarray, List[int]]:
+        """Search in image vectors (CLIP embeddings)"""
+        if query_vector.ndim == 1:
+            query_vector = query_vector.reshape(1, -1)
+        if query_vector.dtype != np.float32:
+            query_vector = query_vector.astype("float32")
+
+        distances, positions = self.image_index.search(query_vector, top_k)
+
+        item_ids = []
+        for pos in positions[0]:
+            if 0 <= pos < len(self.image_id_map):
+                item_ids.append(self.image_id_map[pos])
+            else:
+                item_ids.append(-1)
+
+        return distances, positions, item_ids
     def save(self):
         """
         Writes FAISS index and id_map to disk

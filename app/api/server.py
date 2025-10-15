@@ -77,7 +77,10 @@ async def startup_event():
 
 
 # === ENDPOINTS ===
-
+@app.on_event("startup")
+async def startup_event():
+    init_db()
+    print("[API] ClipMind API server started")
 @app.get("/")
 async def root():
     """Health check endpoint"""
@@ -92,34 +95,37 @@ async def root():
 async def search(
         q: str = Query(..., description="Search query text"),
         k: int = Query(default=None, description=f"Number of results (default: {config.top_k_results})", ge=1, le=100),
-        mode: str = Query(default="all", description="Search mode: all, text, images, clipboard")
+        mode: str = Query(default="all", description="Search mode: all, text, images, clipboard"),
+        after: int = Query(default=None, description="Only return items after this timestamp")
 ):
-    """
-    Semantic search through clipboard and screenshot history
 
-    - q: Search query text
-    - k: Number of results to return
-    - mode: Search mode
-      - "all": Search everything (default)
-      - "text": Search text content only (clipboard + OCR)
-      - "images": Search screenshot images by visual content
-      - "clipboard": Search clipboard items only
     """
+       Semantic search through clipboard and screenshot history
+
+       - q: Search query text
+       - k: Number of results to return
+       - mode: Search mode
+         - "all": Search everything (default)
+         - "text": Search text content only (clipboard + OCR)
+         - "images": Search screenshot images by visual content
+         - "clipboard": Search clipboard items only
+       """
+
     if not q or not q.strip():
         raise HTTPException(status_code=400, detail="Query parameter 'q' cannot be empty")
 
     top_k = k if k is not None else config.top_k_results
 
     try:
-        # Route to appropriate search function
+        # Route to appropriate search function WITH time filter
         if mode == "images":
-            results = search_images_only(q.strip(), top_k=top_k)
+            results = search_images_only(q.strip(), top_k=top_k, after_timestamp=after)
         elif mode == "clipboard":
-            results = search_clipboard_only(q.strip(), top_k=top_k)
+            results = search_clipboard_only(q.strip(), top_k=top_k, after_timestamp=after)
         elif mode == "text":
-            results = search_text_only(q.strip(), top_k=top_k)
+            results = search_text_only(q.strip(), top_k=top_k, after_timestamp=after)
         else:
-            results = semantic_search(q.strip(), top_k=top_k, mode="all")
+            results = semantic_search(q.strip(), top_k=top_k, mode="all", after_timestamp=after)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
