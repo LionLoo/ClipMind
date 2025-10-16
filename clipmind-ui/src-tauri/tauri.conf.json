@@ -28,9 +28,9 @@
       {
         "label": "quickboard",
         "title": "ClipMind Quickboard",
-        "width": 900,
-        "height": 580,
-        "center": true,
+        "width": 700,
+        "height": 400,
+        "center": false,
         "visible": false,
         "resizable": true,
         "decorations": true,

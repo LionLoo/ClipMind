@@ -1,12 +1,14 @@
 """
 Complete ClipMind startup script
 Runs everything: DB init, index rebuild, clipboard monitor, screenshot monitor, API server
+Auto-adds to Windows startup on first run
 """
 import subprocess
 import sys
 import time
 from pathlib import Path
 import threading
+import os
 
 # Add app to path
 sys.path.insert(0, str(Path(__file__).parent / "app"))
@@ -26,22 +28,6 @@ def run_index_rebuild():
         print("[STARTUP] ✓ Vector indexes rebuilt")
     except Exception as e:
         print(f"[STARTUP] ⚠ Index rebuild failed: {e}")
-    # import os
-    #
-    # text_index_exists = os.path.exists("faiss/text_vectors.index")
-    # image_index_exists = os.path.exists("faiss/image_vectors.index")
-    #
-    # if text_index_exists and image_index_exists:
-    #     print("[STARTUP] ✓ Vector indexes found, loading from disk")
-    #     return
-    #
-    # print("[STARTUP] Vector indexes not found, rebuilding from database...")
-    # try:
-    #     from app.index.rebuild_from_db import rebuild_index
-    #     rebuild_index()
-    #     print("[STARTUP] ✓ Vector indexes rebuilt")
-    # except Exception as e:
-    #     print(f"[STARTUP] ⚠ Index rebuild failed: {e}")
 
 def run_clipboard_monitor():
     """Start clipboard monitor in background thread"""
@@ -73,6 +59,17 @@ def run_screenshot_monitor():
     thread.start()
     print("[STARTUP] ✓ Screenshot monitor started (background)")
 
+def setup_windows_startup():
+    """Add ClipMind to Windows startup (runs silently in background)"""
+    if sys.platform != "win32":
+        return  # Only for Windows
+
+    try:
+        from app.core.startup import create_startup
+        create_startup()
+    except Exception as e:
+        print(f"[STARTUP] ⚠ Failed to setup auto-start: {e}")
+
 def run_api_server():
     """Start FastAPI server"""
     print("[STARTUP] Starting API server on http://localhost:8000...")
@@ -90,6 +87,9 @@ if __name__ == "__main__":
     print("ClipMind - Complete Startup")
     print("=" * 60)
 
+    # 0. Auto-add to Windows startup (silent, only adds if not already there)
+    setup_windows_startup()
+
     # 1. Initialize DB
     run_db_init()
 
@@ -105,5 +105,14 @@ if __name__ == "__main__":
     # Give monitors a moment to initialize
     time.sleep(1)
 
+    print("=" * 60)
+    print("[STARTUP] ✓ All services running!")
+    print("[STARTUP] Press Ctrl+C to stop")
+    print("=" * 60)
+
     # 5. Start API server (blocks here)
-    run_api_server()
+    try:
+        run_api_server()
+    except KeyboardInterrupt:
+        print("\n[SHUTDOWN] Stopping ClipMind...")
+        sys.exit(0)

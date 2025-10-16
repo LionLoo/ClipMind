@@ -1,7 +1,8 @@
 # Purpose:
 #   Connect query encoding + FAISS search + DB lookup
 #   Take a text query and return ranked Item results by semantic similarity
-#   Added support for text search, image search, filtering by source AND TIME
+#   FIXED: Time filtering now works correctly by pre-filtering database items
+#   FIXED: Deduplication now looks at ALL results, not just top_k * 2
 
 from typing import List, Tuple, Literal, Optional
 from sqlmodel import select
@@ -41,32 +42,53 @@ def semantic_search(
 
     init_db()
     store = DualVectorStore(text_dim=VECTOR_DIM, image_dim=IMAGE_VECTOR_DIM)
+
+    # STRATEGY: If time filter exists, get ALL matching item IDs from DB first
+    # Then only search for those items in FAISS
+    valid_item_ids = None
+    if after_timestamp is not None or source_filter is not None:
+        with get_session() as session:
+            statement = select(Item.id)
+
+            # Apply filters
+            if after_timestamp is not None:
+                statement = statement.where(Item.created_ts >= after_timestamp)
+            if source_filter is not None:
+                statement = statement.where(Item.source == source_filter)
+
+            valid_item_ids = set(session.exec(statement).all())
+
+            if not valid_item_ids:
+                return []  # No items match the filters
+
     results = []
 
     # Search text vectors
     if mode in ["all", "text"]:
         if store.text_index.ntotal > 0:
             query_vector = encode_text_to_vector(query_text)
-            distances, positions, item_ids = store.search_text(query_vector,
-                                                               top_k * 3)  # Get more results for filtering
+
+            # Determine search depth
+            if valid_item_ids is not None:
+                # When filtering, search through ALL matching items or up to a large limit
+                search_k = min(len(valid_item_ids) * 2, store.text_index.ntotal, 500)
+                search_k = max(search_k, top_k * 10)  # At least 10x top_k
+            else:
+                search_k = top_k * 2
+
+            distances, positions, item_ids = store.search_text(query_vector, search_k)
 
             with get_session() as session:
                 for item_id, distance in zip(item_ids, distances[0]):
                     if item_id == -1:
                         continue
 
-                    # Build query with filters
-                    statement = select(Item).where(Item.id == item_id)
+                    # Skip if not in valid set (when filtering)
+                    if valid_item_ids is not None and item_id not in valid_item_ids:
+                        continue
 
-                    # Apply time filter
-                    if after_timestamp is not None:
-                        statement = statement.where(Item.created_ts >= after_timestamp)
-
-                    # Apply source filter
-                    if source_filter is not None:
-                        statement = statement.where(Item.source == source_filter)
-
-                    item = session.exec(statement).first()
+                    # Get item from DB
+                    item = session.get(Item, item_id)
 
                     if item:
                         results.append((item, float(distance), "text"))
@@ -76,38 +98,39 @@ def semantic_search(
         if store.image_index.ntotal > 0:
             # Encode with CLIP
             query_vector = encode_text_for_image_search(query_text)
-            distances, positions, item_ids = store.search_image(query_vector,
-                                                                top_k * 3)  # Get more results for filtering
+
+            # Determine search depth
+            if valid_item_ids is not None:
+                # When filtering, search through ALL matching items or up to a large limit
+                search_k = min(len(valid_item_ids) * 2, store.image_index.ntotal, 500)
+                search_k = max(search_k, top_k * 10)  # At least 10x top_k
+            else:
+                search_k = top_k * 2
+
+            distances, positions, item_ids = store.search_image(query_vector, search_k)
 
             with get_session() as session:
                 for item_id, distance in zip(item_ids, distances[0]):
                     if item_id == -1:
                         continue
 
-                    # Build query with filters
-                    statement = select(Item).where(Item.id == item_id)
-                    statement = statement.where(Item.source == "screenshot")  # Images are always screenshots
+                    # Skip if not in valid set (when filtering)
+                    if valid_item_ids is not None and item_id not in valid_item_ids:
+                        continue
 
-                    # Apply time filter
-                    if after_timestamp is not None:
-                        statement = statement.where(Item.created_ts >= after_timestamp)
+                    # Get item from DB (must be screenshot)
+                    item = session.get(Item, item_id)
 
-                    # Apply source filter (redundant but consistent)
-                    if source_filter is not None:
-                        statement = statement.where(Item.source == source_filter)
-
-                    item = session.exec(statement).first()
-
-                    if item:
+                    if item and item.source == "screenshot":
                         results.append((item, float(distance), "image"))
 
     # Sort by distance (lower = better)
     results.sort(key=lambda x: x[1])
 
-    # Remove duplicates (possible that it appears in image and text)
+    # Remove duplicates - FIX: Look through ALL results, not just top_k * 2
     seen_ids = set()
     unique_results = []
-    for item, distance, search_type in results[:top_k * 2]:  # Look at more results before deduping
+    for item, distance, search_type in results:  # Process ALL results
         if item.id not in seen_ids:
             seen_ids.add(item.id)
             unique_results.append((item, distance))

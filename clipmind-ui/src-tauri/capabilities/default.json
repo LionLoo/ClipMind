@@ -11,11 +11,15 @@
     "core:window:allow-center",
     "core:window:allow-set-focus",
     "core:window:allow-is-visible",
+    "core:window:allow-set-position",
+    "core:window:allow-set-size",
     "core:webview:allow-create-webview-window",
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",
     "global-shortcut:allow-is-registered",
     "clipboard-manager:allow-write-text",
-    "clipboard-manager:allow-read-text"
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-image",
+    "clipboard-manager:allow-read-image"
   ]
 }

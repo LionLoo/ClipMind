@@ -116,11 +116,19 @@ body {
   padding: 12px;
   margin-bottom: 8px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background 0.2s, border 0.2s, box-shadow 0.2s;
+  border: 2px solid transparent;
 }
 
 .item:hover {
   background: #3d3d3d;
+}
+
+/* SELECTED ITEM - Make it very visible! */
+.item.selected {
+  background: #2a4a7c !important;
+  border: 2px solid #0078d4 !important;
+  box-shadow: 0 0 0 1px rgba(0, 120, 212, 0.5) !important;
 }
 
 .item-icon {

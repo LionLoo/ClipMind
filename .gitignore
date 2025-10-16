@@ -16,3 +16,5 @@ faiss/
 # IDE
 .idea/
 .vscode/
+
+processed_screenshots.json

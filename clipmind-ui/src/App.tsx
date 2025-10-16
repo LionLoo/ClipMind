@@ -10,13 +10,13 @@ import {
   isRegistered,
 } from "@tauri-apps/plugin-global-shortcut";
 import { writeText, writeImage } from "@tauri-apps/plugin-clipboard-manager";
-
+import { invoke } from "@tauri-apps/api/core";
 type HKStatus = "pending" | "ok" | "exists" | "failed";
 
 interface ClipItem {
   id: number;
   text: string;
-  source: string;a
+  source: string;
   blob_uri: string | null;
   created_ts: number;
   readable_time: string;
@@ -57,9 +57,12 @@ async function waitForCreated(win: WebviewWindow) {
 async function ensureQuickboardWindow(log: (s: string) => void, pushErr: (s: string) => void) {
   try {
     let qb = WebviewWindow.getByLabel("quickboard");
-    if (qb) return qb;
+    if (qb) {
+      log("[qb] found existing quickboard window");
+      return qb;
+    }
 
-    log("[qb] creating quickboard webview...");
+    log("[qb] creating new quickboard webview...");
     qb = new WebviewWindow("quickboard", {
       url: "index.html",
       visible: false,
@@ -73,23 +76,19 @@ async function ensureQuickboardWindow(log: (s: string) => void, pushErr: (s: str
       height: 580,
     });
 
-    try {
-      await waitForCreated(qb);
-      log("[qb] created");
-    } catch (e: any) {
-      const msg = `[qb] create failed: ${e?.message ?? String(e)}`;
-      pushErr(msg);
-      throw new Error(msg);
-    }
+    await waitForCreated(qb);
+    log("[qb] created successfully");
     return qb;
   } catch (e: any) {
-    pushErr(`[qb] ensure failed: ${e?.message ?? String(e)}`);
+    const msg = `[qb] ensure failed: ${e?.message ?? String(e)}`;
+    log(msg);
+    pushErr(msg);
     throw e;
   }
 }
 
 let lastToggleTime = 0;
-const TOGGLE_COOLDOWN_MS = 300;
+const TOGGLE_COOLDOWN_MS = 200; // Reduced from 300ms
 
 async function toggleQuickboard(log: (s: string) => void, pushErr: (s: string) => void) {
   const now = Date.now();
@@ -99,20 +98,25 @@ async function toggleQuickboard(log: (s: string) => void, pushErr: (s: string) =
   }
   lastToggleTime = now;
 
-  const qb = await ensureQuickboardWindow(log, pushErr);
   try {
+    const qb = await ensureQuickboardWindow(log, pushErr);
     const visible = await qb.isVisible();
+
+    log(`[qb] current visible state: ${visible}`);
+
     if (visible) {
       await qb.hide();
-      log("[qb] hide");
+      log("[qb] hidden");
     } else {
       await qb.center();
       await qb.show();
       await qb.setFocus();
-      log("[qb] show + focus + center");
+      log("[qb] shown + focused + centered");
     }
   } catch (e: any) {
-    pushErr(`[qb] toggle failed: ${e?.message ?? String(e)}`);
+    const msg = `[qb] toggle failed: ${e?.message ?? String(e)}`;
+    log(msg);
+    pushErr(msg);
   }
 }
 
@@ -126,17 +130,29 @@ export default function App() {
   const [items, setItems] = useState<ClipItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [backendStatus, setBackendStatus] = useState<"checking" | "online" | "offline">("checking");
+  const [selectedIndex, setSelectedIndex] = useState(0);
 
   const [hkStatuses, setHkStatuses] = useState<Record<string, HKStatus>>({});
   const [errors, setErrors] = useState<string[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [stats, setStats] = useState<any>(null);
   const didAutoOpen = useRef(false);
+  const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const log = (s: string) => setLogs((L) => [...L, s]);
   const pushErr = (s: string) => setErrors((E) => [...E, s]);
 
-  const hotkeys = ["CommandOrControl+Shift+Space"];
+  const hotkeys = ["CommandOrControl+Shift+V"];
+
+  // Auto-scroll selected item into view
+  useEffect(() => {
+    if (itemRefs.current[selectedIndex]) {
+      itemRefs.current[selectedIndex]?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }
+  }, [selectedIndex]);
 
   // Check backend health
   useEffect(() => {
@@ -225,6 +241,8 @@ export default function App() {
           console.log('[DEBUG] Recent items:', data);
           setItems(data.items || []);
         }
+        // Reset selection to first item when results change
+        setSelectedIndex(0);
       } catch (e: any) {
         console.error("[DEBUG] Fetch failed:", e);
         setItems([]);
@@ -274,23 +292,69 @@ export default function App() {
   }, [isQuickboard, backendStatus, q, filter, timeRange]);
 
   // Copy item to clipboard and close
-  const handleItemClick = async (item: ClipItem) => {
+const handleItemClick = async (item: ClipItem) => {
   try {
     if (item.source === "screenshot" && item.blob_uri) {
-      await writeImage(item.blob_uri);
-      log(`[qb] copied image ${item.id}`);
+      // Get RGBA data with dimensions from Rust
+      const result: [number[], number, number] = await invoke('read_image_file', {
+        path: item.blob_uri
+      });
+
+      const [rgbaBytes, width, height] = result;
+      const uint8Array = new Uint8Array(rgbaBytes);
+
+      // writeImage needs an object with rgba, width, height
+      await writeImage({
+        rgba: uint8Array,
+        width: width,
+        height: height
+      });
+
+      log(`[qb] copied image ${item.id} (${width}x${height})`);
     } else {
       await writeText(item.text);
       log(`[qb] copied text ${item.id}`);
     }
+
+    // Make sure we hide the window after copying
     const w = await getCurrentWebviewWindow();
     await w.hide();
+    log(`[qb] window hidden after copy`);
   } catch (e: any) {
     console.error("[DEBUG] Copy failed:", e);
+    log(`[qb] copy failed: ${e?.message ?? String(e)}`);
     pushErr(`[qb] copy failed: ${e?.message ?? String(e)}`);
-    alert(`Copy failed: ${e?.message ?? String(e)}`);
+
+    // Still try to hide the window even if copy failed
+    try {
+      const w = await getCurrentWebviewWindow();
+      await w.hide();
+    } catch {}
   }
 };
+
+  // Reset selection when quickboard becomes visible
+  useEffect(() => {
+    if (!isQuickboard) return;
+
+    const resetOnShow = async () => {
+      const w = await getCurrentWebviewWindow();
+      const unlisten = await w.onFocusChanged(({ payload: focused }) => {
+        if (focused) {
+          setSelectedIndex(0);
+          setQ(""); // Also clear search when reopening
+        }
+      });
+      return unlisten;
+    };
+
+    let unlisten: (() => void) | null = null;
+    resetOnShow().then((fn) => (unlisten = fn));
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [isQuickboard]);
 
   useEffect(() => {
     (async () => {
@@ -306,25 +370,31 @@ export default function App() {
           await ensureQuickboardWindow(log, pushErr);
 
           for (const hk of hotkeys) {
-            try {
-              const already = await isRegistered(hk);
-              if (already) {
-                await unregister(hk);
-                log(`[hk] unregistered existing: ${hk}`);
-              }
+  try {
+    // FORCE unregister first, even if it fails
+    try {
+      await unregister(hk);
+      log(`[hk] force unregistered: ${hk}`);
+    } catch {
+      log(`[hk] nothing to unregister for: ${hk}`);
+    }
 
-              await register(hk, async () => {
-                log(`[hk] fired: ${hk}`);
-                await toggleQuickboard(log, pushErr);
-              });
-              log(`[hk] registered: ${hk}`);
-              setHkStatuses((s) => ({ ...s, [hk]: "ok" }));
-            } catch (e: any) {
-              const msg = `[hk] register failed ${hk}: ${e?.message ?? String(e)}`;
-              pushErr(msg);
-              setHkStatuses((s) => ({ ...s, [hk]: "failed" }));
-            }
-          }
+    // Small delay to let the OS release the hotkey
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Now register
+    await register(hk, async () => {
+      log(`[hk] fired: ${hk}`);
+      await toggleQuickboard(log, pushErr);
+    });
+    log(`[hk] registered successfully: ${hk}`);
+    setHkStatuses((s) => ({ ...s, [hk]: "ok" }));
+  } catch (e: any) {
+    const msg = `[hk] register failed ${hk}: ${e?.message ?? String(e)}`;
+    pushErr(msg);
+    setHkStatuses((s) => ({ ...s, [hk]: "failed" }));
+  }
+}
 
           // Keepalive: Re-register hotkeys every 30 seconds to prevent them from dying
           const keepalive = setInterval(async () => {
@@ -476,6 +546,17 @@ export default function App() {
                 e.preventDefault();
                 const w = await getCurrentWebviewWindow();
                 await w.hide();
+              } else if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setSelectedIndex((prev) => Math.min(prev + 1, items.length - 1));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setSelectedIndex((prev) => Math.max(prev - 1, 0));
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                if (items.length > 0 && items[selectedIndex]) {
+                  await handleItemClick(items[selectedIndex]);
+                }
               }
             }}
             autoFocus
@@ -525,8 +606,13 @@ export default function App() {
         {backendStatus === "online" && !loading && items.length === 0 && (
           <div className="no-items">No items found</div>
         )}
-        {backendStatus === "online" && !loading && items.map((item) => (
-          <div key={item.id} className="item" onClick={() => handleItemClick(item)}>
+        {backendStatus === "online" && !loading && items.map((item, index) => (
+          <div
+            key={item.id}
+            ref={(el) => (itemRefs.current[index] = el)}
+            className={`item ${index === selectedIndex ? 'selected' : ''}`}
+            onClick={() => handleItemClick(item)}
+          >
             <div className="item-icon">
               {item.source === "clipboard" ? "📋" : "🖼️"}
             </div>
